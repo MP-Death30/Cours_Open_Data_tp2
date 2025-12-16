@@ -184,6 +184,30 @@ Recommandations IA :
 ...
 ```
 
+---
+
+## 📈 Dashboard Interactif (Bonus)
+
+Un tableau de bord interactif **Streamlit** est inclus pour visualiser les résultats du pipeline.
+
+### Lancer le Dashboard
+
+```bash
+# Avec UV (Recommandé)
+uv run streamlit run dashboard.py
+
+# Avec Python standard
+streamlit run dashboard.py
+```
+
+### Fonctionnalités
+* **🗺️ Carte Thermique :** Visualisation des températures (Aujourd'hui/Demain) sur une carte interactive de la France.
+* **🏙️ Filtre par Ville :** Sélectionnez une ou plusieurs villes (ex: Avignon) pour voir leurs prévisions détaillées.
+* **📊 KPIs Qualité :** Affichage en temps réel du score de qualité, de la complétude et du taux de doublons.
+* **🔍 Explorateur de Données :** Tableur intégré pour inspecter les enregistrements bruts.
+
+
+
 ## 🔐 Configuration
 Créez un fichier `.env` à la racine du projet avec vos clés API :
 ```env

@@ -3,9 +3,11 @@ import json
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
+import logging
 
 from .config import RAW_DIR, PROCESSED_DIR
 
+logger = logging.getLogger(__name__)
 
 def save_raw_json(data: list[dict], name: str) -> Path:
     """Sauvegarde les données brutes en JSON."""
@@ -37,3 +39,17 @@ def save_parquet(df: pd.DataFrame, name: str) -> Path:
 def load_parquet(filepath: str | Path) -> pd.DataFrame:
     """Charge un fichier Parquet."""
     return pd.read_parquet(filepath)
+
+
+class StorageManager:
+    """Gère les opérations de stockage et la vérification incrémentale (Bonus)."""
+    
+    def file_exists_for_today(self, directory: Path, prefix: str) -> bool:
+        """Vérifie si des fichiers avec un préfixe donné existent pour la date du jour."""
+        date_str = datetime.now().strftime("%Y%m%d")
+        
+        # Cherche le rapport de qualité, car c'est le dernier livrable
+        # (Nous vérifions le rapport car il est créé à la fin du pipeline)
+        matches = list(directory.glob(f"{prefix}_{date_str}_*.md")) 
+        
+        return len(matches) > 0

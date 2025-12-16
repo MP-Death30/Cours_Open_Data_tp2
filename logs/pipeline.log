@@ -1,0 +1,4 @@
+[2025-12-16 16:40:07] INFO - __main__: ============================================================
+[2025-12-16 16:40:07] INFO - __main__: 🚀 PIPELINE OPEN DATA - MÉTÉO & GÉO
+[2025-12-16 16:40:07] INFO - __main__: ============================================================
+[2025-12-16 16:40:07] WARNING - __main__: Pipeline sauté : Rapport de qualité déjà existant pour aujourd'hui dans C:\Users\mathi\Documents\Master\Open-Data\tp2-pipeline\data\reports. Exécution incrémentale.

@@ -3,13 +3,50 @@
 import argparse
 from datetime import datetime
 import pandas as pd
+import logging # NOUVEAU
+from logging.handlers import RotatingFileHandler # NOUVEAU (pour le log structuré)
+from pathlib import Path # NOUVEAU (pour les chemins de log)
 
-from .fetchers.openmeteo import OpenMeteoFetcher, CITIES_FRANCE # Utiliser le nouveau fetcher
+from .fetchers.openmeteo import OpenMeteoFetcher, CITIES_FRANCE 
 from .enricher import DataEnricher
 from .transformer import DataTransformer
 from .quality import QualityAnalyzer
-from .storage import save_raw_json, save_parquet
-from .config import MAX_ITEMS
+# Import des fonctions de stockage + la nouvelle classe StorageManager (à importer)
+from .storage import save_raw_json, save_parquet, StorageManager 
+from .config import MAX_ITEMS, REPORTS_DIR # Import REPORTS_DIR pour le check incrémental
+
+# Configuration du logger
+logger = logging.getLogger(__name__) # NOUVEAU
+
+def setup_logging():
+    """Configure le système de logging structuré (Bonus)."""
+    log_formatter = logging.Formatter(
+        '[%(asctime)s] %(levelname)s - %(name)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Configuration du Handler pour la console
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+    
+    # Configuration du Handler pour le fichier (Rolling file)
+    log_file = Path('logs/pipeline.log')
+    log_file.parent.mkdir(exist_ok=True)
+    file_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=1024*1024*5, # 5MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(log_formatter)
+    
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO) # Niveau par défaut
+    
+    # Évite d'ajouter plusieurs fois les handlers lors des rechargements (si besoin)
+    if not root_logger.handlers:
+        root_logger.addHandler(console_handler)
+        root_logger.addHandler(file_handler)
 
 
 def run_pipeline(
@@ -30,21 +67,26 @@ def run_pipeline(
     """
     stats = {"start_time": datetime.now()}
     
-    print("=" * 60)
-    print("🚀 PIPELINE OPEN DATA - MÉTÉO & GÉO")
-    print("=" * 60)
+    storage_manager = StorageManager() # NOUVEAU : Instancier le manager
+    
+    logger.info("=" * 60)
+    logger.info("🚀 PIPELINE OPEN DATA - MÉTÉO & GÉO")
+    logger.info("=" * 60)
+    
+    # --- LOGIQUE INCRÉMENTALE (BONUS) ---
+    if storage_manager.file_exists_for_today(REPORTS_DIR, "meteo_quality"):
+        logger.warning(f"Pipeline sauté : Rapport de qualité déjà existant pour aujourd'hui dans {REPORTS_DIR}. Exécution incrémentale.")
+        return {"status": "skipped_incremental", "end_time": datetime.now()}
     
     # === ÉTAPE 1 : Acquisition ===
-    # Ici, la "catégorie" est la liste de villes à interroger
     city_list = CITIES_FRANCE 
     
-    print("\n📥 ÉTAPE 1 : Acquisition des données")
+    logger.info("\n📥 ÉTAPE 1 : Acquisition des données") # LOG CHANGE
     fetcher = OpenMeteoFetcher()
-    # Récupère les prévisions pour MAX_ITEMS villes
     forecasts = list(fetcher.fetch_all(city_list, max_items, verbose)) 
     
     if not forecasts:
-        print("❌ Aucune prévision récupérée. Arrêt.")
+        logger.error("❌ Aucune prévision récupérée. Arrêt.") # LOG CHANGE
         return {"error": "No data fetched"}
     
     save_raw_json(forecasts, "meteo_raw")
@@ -52,7 +94,7 @@ def run_pipeline(
     
     # === ÉTAPE 2 : Enrichissement ===
     if not skip_enrichment:
-        print("\n🌍 ÉTAPE 2 : Enrichissement (géocodage)")
+        logger.info("\n🌍 ÉTAPE 2 : Enrichissement (géocodage)") # LOG CHANGE
         enricher = DataEnricher()
         
         # Extraire les noms de villes uniques
@@ -60,52 +102,48 @@ def run_pipeline(
         
         if addresses:
             # Construire le cache de géocodage
-            # On utilise toutes les adresses, car MAX_ITEMS est déjà bas
             geo_cache = enricher.build_geocoding_cache(addresses) 
             
             # Enrichir les prévisions
-            # Utiliser la méthode adaptée pour les prévisions
             forecasts = enricher.enrich_forecasts(forecasts, geo_cache, "original_city_name") 
             stats["enricher"] = enricher.get_stats()
         else:
-            print("⚠️ Pas de villes à géocoder")
+            logger.warning("⚠️ Pas de villes à géocoder") # LOG CHANGE
     else:
-        print("\n⏭️ ÉTAPE 2 : Enrichissement (ignoré)")
+        logger.info("\n⏭️ ÉTAPE 2 : Enrichissement (ignoré)") # LOG CHANGE
     
     # === ÉTAPE 3 : Transformation ===
-    print("\n🔧 ÉTAPE 3 : Transformation et nettoyage")
+    logger.info("\n🔧 ÉTAPE 3 : Transformation et nettoyage") # LOG CHANGE
     df = pd.DataFrame(forecasts)
     
     transformer = DataTransformer(df)
-    # Les transformations sont génériques, mais on pourrait ajouter le nettoyage des codes WMO
     df_clean = (
         transformer
         .remove_duplicates(['date', 'latitude', 'longitude']) 
         .handle_missing_values(numeric_strategy='median', text_strategy='unknown')
-        .normalize_text_columns(['validated_city']) # Utiliser validated_city pour la normalisation
+        .normalize_text_columns(['validated_city'])
         .add_derived_columns()
         .get_result()
     )
     
-    print(f"   Résumé des transformations:\n{transformer.get_summary()}")
+    logger.info(f"   Résumé des transformations:\n{transformer.get_summary()}") # LOG CHANGE
     stats["transformer"] = {"transformations": transformer.transformations_applied}
     
     # === ÉTAPE 4 : Qualité ===
-    print("\n📊 ÉTAPE 4 : Analyse de qualité")
+    logger.info("\n📊 ÉTAPE 4 : Analyse de qualité") # LOG CHANGE
     analyzer = QualityAnalyzer(df_clean)
     metrics = analyzer.analyze()
     
-    print(f"   Note: {metrics.quality_grade}")
-    print(f"   Complétude: {metrics.completeness_score * 100:.1f}%")
-    print(f"   Doublons: {metrics.duplicates_pct:.1f}%")
+    logger.info(f"   Note: {metrics.quality_grade}") # LOG CHANGE
+    logger.info(f"   Complétude: {metrics.completeness_score * 100:.1f}%") # LOG CHANGE
+    logger.info(f"   Doublons: {metrics.duplicates_pct:.1f}%") # LOG CHANGE
     
     # Générer le rapport
     analyzer.generate_report("meteo_quality")
     stats["quality"] = metrics.dict()
     
     # === ÉTAPE 5 : Stockage ===
-    print("\n💾 ÉTAPE 5 : Stockage final")
-    # Nom du fichier par défaut
+    logger.info("\n💾 ÉTAPE 5 : Stockage final") # LOG CHANGE
     output_path = save_parquet(df_clean, "meteo_enriched") 
     stats["output_path"] = str(output_path)
     
@@ -113,20 +151,22 @@ def run_pipeline(
     stats["end_time"] = datetime.now()
     stats["duration_seconds"] = (stats["end_time"] - stats["start_time"]).seconds
     
-    print("\n" + "=" * 60)
-    print("✅ PIPELINE TERMINÉ")
-    print("=" * 60)
-    print(f"   Durée: {stats['duration_seconds']}s")
-    print(f"   Enregistrements: {len(df_clean)}")
-    print(f"   Qualité: {metrics.quality_grade}")
-    print(f"   Fichier: {output_path}")
+    logger.info("\n" + "=" * 60) # LOG CHANGE
+    logger.info("✅ PIPELINE TERMINÉ") # LOG CHANGE
+    logger.info("=" * 60) # LOG CHANGE
+    logger.info(f"   Durée: {stats['duration_seconds']}s") # LOG CHANGE
+    logger.info(f"   Enregistrements: {len(df_clean)}") # LOG CHANGE
+    logger.info(f"   Qualité: {metrics.quality_grade}") # LOG CHANGE
+    logger.info(f"   Fichier: {output_path}") # LOG CHANGE
     
     return stats
 
 
 def main():
+    # NOUVEAU : Configure le logging en premier
+    setup_logging()
+    
     parser = argparse.ArgumentParser(description="Pipeline Open Data Météo")
-    # Nous avons retiré l'argument 'category' car la liste est fixe (CITIES_FRANCE)
     parser.add_argument("--max-items", "-m", type=int, default=MAX_ITEMS, help="Nombre max de villes")
     parser.add_argument("--skip-enrichment", "-s", action="store_true", help="Ignorer l'enrichissement")
     parser.add_argument("--verbose", "-v", action="store_true", default=True)
